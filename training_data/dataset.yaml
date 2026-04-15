@@ -1,0 +1,12 @@
+kpt_shape:
+- 4
+- 3
+names:
+  0: sailboat
+  1: start_boat
+  2: finish_boat
+  3: yellow_mark
+  4: red_mark
+path: /home/qbrighto/CSCI1430-FinalProject/mast_kpt_data
+train: train/images
+val: val/images

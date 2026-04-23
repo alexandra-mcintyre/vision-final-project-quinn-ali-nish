@@ -75,8 +75,8 @@
 **Important**: In your report, please
 1) Make it very clear who on the team contributed what, and 
 2) Include the dates of at least *two* meetings you had with your mentor.
-\textbf{Team name: \emph{HERE PLEASE}}\\
-\textbf{TA name: \emph{HERE PLEASE}}
+\textbf{Team name: \emph{Boat Goats}}\\
+\textbf{TA name: \emph{Kelvin Jiang}}
 
 \emph{Note:} when submitting this document to Gradescope, make sure to add all other team members to the submission. This can be done on the submission page after uploading.
 
@@ -88,10 +88,9 @@ Before writing your progress report, you should have met with your TA and talked
 
 Please describe in one paragraph (3--4 sentences) per team member what each of you contributed to the project so far.
 \begin{description}
-\item[Person 1] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. 
-\item[Person 2] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
-\item [Person 3] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. 
-\item [Person 4] Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur.
+\item[Person 1] Person 1 wrote the code for downloading the sailing footage and extracting the first 5 minute clip we were going to be training on in a file named download_footage.py. They then also wrote the extract_frames.py file, which extracts frames from the video and saves them as .jpg files. They also wrote the code for how we would be labelling each frame, which is a manuel interactive system that processes each frame and allows the user to label each boat and mark within each frame. This code is in label_frames.py, and it saves the data collected in a json named mast_frame_labels.json.
+\item[Person 2] Person 2 wrote code in a file named build_kpt_dataset.py, which takes the data collected in mast_frame_labels.json and converts it to YOLO pose training data to be stored in a folder called mast_kpt_data. They also utilized label_frames.py to label and store data for 200 frames in the 5 minute clip we have been training with. 
+\item[Person 3] Person 3 wrote the code for the projection solver, which takes the kpt data and uses optimization to estimate the camera settings and each boat’s real-world position and heading. Person 3 also wrote code in a file named solver_bundle.py which takes 5 consecutive sailboat video frames and jointly solves them together to estimate a smooth moving camera path plus each boat’s changing real-world position and heading over time.
 \end{description}
 
 \end{document}

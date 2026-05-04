@@ -12,10 +12,8 @@ export default function RaceCanvas({ data, time }: any) {
     const ctx = canvas.getContext("2d")!;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    // Draw course FIRST (background)
     drawCourse(ctx, data.course);
 
-    // Then boats
     data.boats.forEach((boat: any) => {
       const state = interpolate(boat, time);
       drawBoat(ctx, state, boat.team);

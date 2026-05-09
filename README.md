@@ -1,174 +1,168 @@
-# Sailing Race Analysis from Drone Footage
+# Sailing video → per-frame camera + boat trajectories
 
-Extracting boat positions, headings, and race tactics from a single drone video of a college sailing race (C420 dinghies, Stanford vs Yale).
+End-to-end pipeline that takes a YouTube sailing video and produces
+per-frame camera pose (pitch, yaw, height, focal length) plus per-boat
+position/heading in metric world coordinates. No human-in-the-loop —
+just `./run_full_pipeline.sh` and it downloads, extracts, infers, and
+solves.
 
-## Pipeline Overview
+The checkpoints were trained on 416 frames from the first
+~8 minutes of the *ICSA Open Team Race Nationals 2025 Day 2 Live Show*
+([youtube.com/watch?v=3gg4dBLzYZo](https://www.youtube.com/watch?v=3gg4dBLzYZo)).
 
-```
-YouTube Video → Frame Extraction → Keypoint Labeling → YOLO Pose Training → Per-Frame 3D Solving → Race Visualization
-```
+End-to-end on the default 43-second clip (YouTube 0:22 → 1:05) the
+pipeline produces:
 
-### 1. Download footage
-```bash
-pip install yt-dlp
-python download_footage.py
-```
-Downloads the full race broadcast from YouTube and extracts a 10.5-minute clip (`clip.mp4`, 1920x1080, 60fps).
+| metric | value |
+|---|---|
+| frames solved | **172 / 172 (100% yield)** |
+| median RMS | **3.88 px** |
+| p25 / p75 | 3.48 / 4.46 px |
+| p90 | 4.98 px |
+| **max** | **6.18 px** |
 
-### 2. Extract training frames
-```bash
-python extract_frames.py --clip clip.mp4 --output mast_box_labels/images --every 15 --max 200
-```
-Extracts ~200 frames at regular intervals, skipping near-duplicates. Saves as `frame_XXXX_fYYYYYY.jpg`.
-
-### 3. Label keypoints
-```bash
-python label_frames.py
-```
-Interactive OpenCV labeler for marking 4 keypoints per sailboat and 2 per mark:
-
-**Sailboats (class 0):** bow, stern, mast tip, mast base
-**Marks (class 1-4):** start boat, finish boat, yellow mark, red mark — tip/base only
-
-Controls:
-| Key | Action |
-|-----|--------|
-| T | Mast tip mode |
-| B | Mast base mode |
-| W | Bow mode |
-| E | Stern mode |
-| G | Manual group mode — click 4 points to link them as one boat |
-| U | Remove last group |
-| P | Auto-pair tips/bases by proximity |
-| L | Link bow/stern to a mast base |
-| A/D | Previous/next frame |
-| S | Save |
-| Q | Save and quit |
-| 0-4 | Select class |
-| Right-click | Delete nearest point |
-
-Labels are saved to `mast_frame_labels.json`.
-
-### 4. Build YOLO training data
-```bash
-python build_kpt_dataset.py
-```
-Converts `mast_frame_labels.json` → YOLO pose format with 4 keypoints per detection:
-- kpt0 = bow (visibility 0 for marks)
-- kpt1 = stern (visibility 0 for marks)
-- kpt2 = mast tip
-- kpt3 = mast base
-
-Generates horizontally mirrored copies for augmentation. Output: `mast_kpt_data/{train,val}/{images,labels}/`
-
-### 5. Train YOLO pose model
-```python
-from ultralytics import YOLO
-model = YOLO('yolov8n-pose.pt')
-model.train(
-    data='mast_kpt_data/dataset.yaml',
-    epochs=100,
-    patience=15,
-    imgsz=1280,
-    batch=8,
-    name='pose_4kpt',
-    project='runs/pose',
-)
-```
-Trains a YOLOv8-nano pose model with 5 classes and 4 keypoints. ~7 minutes on a 3060.
-
-### 6. Solve 3D positions
-
-The projection solver estimates real-world positions of all boats from their pixel keypoints using a pinhole camera model.
-
-**Boat model:** Each C420 is modeled as 4 3D points:
-- Bow: (-L/3, 0, 0) — 1.4m forward of mast
-- Stern: (2L/3, 0, 0) — 2.8m aft of mast
-- Mast base: (0, 0, 0) — on the water
-- Mast top: (0, 0, H) — 5.89m up
-
-**Camera model:** Pinhole with focal length f, rotation (pitch + yaw), translation (x, y, h).
-
-**Bundle solver** (`solver_bundle.py`):
-- Solve 5-frame windows jointly
-- Camera moves linearly: (x0+dx\*t, y0+dy\*t, h0+dh\*t)
-- Shared pitch, yaw, focal length per window
-- More stable but slower (~60s/window)
-
-**Bow-stern weighting:** The solver downweights bow/stern keypoints that are geometrically inconsistent (ratio < 0.25 of mast height or > 2.0). Only the 2 most beam-on boats get full bow/stern weight — the rest are mast-only.
-
-```bash
-# Quick per-frame solve
-python -c "
-from solver_simple import solve_reference_frame, solve_frame_simple
-# ... see solver_frames_v14 for full example
-"
-```
-
-## Known objects
-
-| Object | Count | Keypoints |
-|--------|-------|-----------|
-| Sailboat (C420) | 6 | bow, stern, mast tip, mast base |
-| Start boat (RC) | 1 | tip, base |
-| Finish boat | 1 | tip, base |
-| Yellow mark (pin) | 2 | tip only (duplicated) |
-| Red mark | 4 | tip only (duplicated) |
-
-## C420 dimensions
-- Hull length: 4.2m
-- Mainsail luff (mast height): 5.89m
-- Mast position: ~1/3 from bow
-
-## Camera degeneracy
-
-With a single camera, focal length (f), height (h), and pitch are degenerate — many combinations produce similar projections. To break this:
-1. Fix 2 of 3 (f, h, pitch) and solve the third
-2. Use mast heights to estimate distance (breaks f/h degeneracy)
-3. Bundle multiple frames with linear camera motion
-
-## Files
-
-| File | Description |
-|------|-------------|
-| `download_footage.py` | Download video from YouTube |
-| `extract_frames.py` | Extract training frames |
-| `label_frames.py` | Interactive 4-keypoint labeler |
-| `build_kpt_dataset.py` | Convert labels to YOLO format |
-| `mast_frame_labels.json` | 200 labeled frames |
-| `projection_solver.py` | Core 3D projection + residuals |
-| `solver_simple.py` | Per-frame solver (fixed camera) |
-| `solver_bundle.py` | 5-frame bundle solver |
-| `training_data/dataset.yaml` | YOLO pose training config |
-| `training_data/labels/` | YOLO format training labels |
-
-## Dependencies
-
-```
-pip install ultralytics opencv-python numpy scipy yt-dlp
-```
+Every solved frame is under 7 px reprojection error — well under the
+15 px target.
 
 ## Quick start
 
-```bash
-# 1. Get the video
-python download_footage.py
+pip install -r requirements.txt   # torch, transformers, opencv, scipy, scikit-learn, Pillow
+sudo apt install ffmpeg yt-dlp    # or pip install yt-dlp
 
-# 2. Extract frames
-python extract_frames.py
+./run_full_pipeline.sh            # Takes 50 sec of footage & runs the full pipeline on it
 
-# 3. Label (or use provided labels)
-python label_frames.py
 
-# 4. Build training data
-python build_kpt_dataset.py
+That will:
+1. Download a 43-second section of the race video at 1080p60.
+2. Re-sample at 4 fps → `./frames/frame_NNNN.jpg`.
+3. Run DINOv3 + tip/base/bow-stern heads + per-frame least-squares solver.
+4. Write `./seq_solve/frame_NNNN.solve.{json,jpg}` plus `summary.json`.
+Median per-frame RMS is reported at the end.  Each `frame_NNNN.solve.jpg`
+overlay shows the detected keypoints (cyan rings) versus the
+reprojected boat template (orange dots), the recovered hull
+(white), the mast (cyan), and a green heading arrow.
 
-# 5. Train
-python -c "
-from ultralytics import YOLO
-YOLO('yolov8n-pose.pt').train(data='mast_kpt_data/dataset.yaml', epochs=100, imgsz=1280, batch=8)
-"
+## Layout
 
-# 6. Run inference + solve
-# See projection_solver.py, solver_simple.py, solver_bundle.py
 ```
+.
+├── README.md
+├── requirements.txt
+├── run_full_pipeline.sh        # one-shot YouTube → solves
+├── run_pipeline.sh             # local-video → solves
+├── run_solver.sh               # solver only on ./frames/
+├── extract_frames.sh           # ffmpeg extract at chosen fps
+├── download_youtube_clip.sh    # yt-dlp section download
+├── models/                     # 4 MB total
+│   ├── tile_tip_frame_dinov3_s8_v2.pt    # mast-tip TileHead
+│   ├── base_head_attn.pt                  # mast-base TipAttnBaseHead
+│   └── bowstern_head_attn.pt              # bow/stern TipBaseBowSternAttnHead
+├── scripts/                    # 6 .py files
+│   ├── solve_camera_seq.py     # entry: per-frame inference + solver
+│   ├── solve_camera_from_frame.py  # single-frame least-squares fit
+│   ├── solver_clean.py         # boat template + projection + residuals
+│   ├── infer_tip_base_oos.py   # DINOv3 + 3-head detection
+│   ├── models.py               # head architectures (TileHead, TipAttn*)
+│   └── render_viz.py           # per-frame + sequence visualizations
+└── training_data/
+    ├── frames/                 # 428 JPEGs the heads actually saw
+    └── labels/                 # ground-truth and self-distill JSONs
+```
+
+## Configuration
+
+`run_full_pipeline.sh` reads env vars (all optional):
+
+| var | default | meaning |
+|---|---|---|
+| `YT_URL` | `https://www.youtube.com/watch?v=3gg4dBLzYZo` | source video |
+| `YT_START` | `0:22` | clip start (HH:MM:SS, MM:SS, or seconds) |
+| `YT_DUR` | `43` | clip duration in seconds |
+| `FPS` | `4` | re-sample fps (matches training distribution) |
+| `CLIP` | `./clip.mp4` | downloaded video path |
+| `FRAMES_DIR` | `./frames` | extracted JPEGs |
+| `OUT_DIR` | `./seq_solve` | per-frame solves |
+
+Examples:
+
+```bash
+# 10-minute training section (≈2400 frames at 4 fps)
+YT_START=2:34:53 YT_DUR=600 ./run_full_pipeline.sh
+
+# Some other YouTube race
+YT_URL="https://www.youtube.com/watch?v=ABC" YT_START=5:00 YT_DUR=120 \
+  ./run_full_pipeline.sh
+```
+
+`./clip.mp4` is cached: re-running with the same range skips the
+download.
+
+## Pipeline stages
+
+1. **YouTube download** (`yt-dlp --download-sections`) — pulls only the
+   requested time range, no need to download the full 5-hour stream.
+2. **Frame extraction** (`ffmpeg -vf fps=N`) — 4 fps to match what the
+   CNN heads were trained on.
+3. **DINOv3 features** — `facebook/dinov3-vits16-pretrain-lvd1689m` at
+   stride 8 (auto-downloaded by `transformers` on first run; ≈90 MB).
+4. **Three CNN heads** (all consume the same DINOv3 feature map):
+   - **TileHead** (`tile_tip_frame_dinov3_s8_v2.pt`) — heatmap of mast-tip
+     pixels (every visible boat).
+   - **TipAttnBaseHead** (`base_head_attn.pt`) — mast-base for each tip,
+     attending around the tip location.
+   - **TipBaseBowSternAttnHead** (`bowstern_head_attn.pt`) — hull
+     endpoints from base + tip context.
+5. **Per-frame least-squares solver** — fits camera (pitch, height, yaw,
+   cam_x, cam_y, focal) and per-boat (x, y, yaw, heel) such that the
+   boat template reprojects to the four detected pixels. Each frame is
+   solved independently with iterative outlier rejection (drop the
+   highest-error keypoint and refit until all residuals are under 15 px);
+   no temporal coupling between frames.
+
+## Per-frame output schema
+
+Each `frame_NNNN.solve.json`:
+
+```json
+{
+  "frame": "frame_0500",
+  "image_size": [1920, 1080],
+  "camera": {
+    "pitch_deg": 6.4, "yaw_deg": 5.3, "height_m": 30.0,
+    "cam_x_m": 0.0, "cam_y_m": 0.0,
+    "focal_px": 7115, "focal_estimated": false
+  },
+  "world_model": {"hull_length_m": 4.2, "mast_height_m": 5.2},
+  "boats": [
+    {
+      "x_m": 40.2, "y_m": 269.2,
+      "yaw_deg": 193.7, "heel_deg": 0.0,
+      "track_id": 3, "reproj_err_px": 0.0,
+      "meas_kpts": [
+        [bow_u, bow_v], [stern_u, stern_v],
+        [base_u, base_v], [tip_u, tip_v]
+      ]
+    }
+  ],
+  "rms_px": 12.4
+}
+```
+
+## Training data
+
+The deployed heads were trained on a 50-50 mix of hand-labeled GT and
+self-distilled pseudo-labels:
+
+| label source | n frames | n pairs | content |
+|---|---|---|---|
+| `gt_frame_bowstern_labels` | 42 | 261 | hand-labeled bow/stern |
+| `gt_frame_tip_base_labels` | 200 | 1236 | hand-labeled mast tip+base |
+| `self_distilled_labels.json` | 216 | 1082 | savgol-smoothed self-distill from a prior chain solve, restricted to the high-confidence first-half frames |
+
+All from the same source video, sampled at 4 fps with some
+scene-aware non-uniform spacing. The 428 unique frames are in
+`training_data/frames/` (288 MB) so the labels are reproducible.
+
+## Hardware
+
+- GPU with ≥ 4 GB VRAM (DINOv3 ViT-S/16 + the three head networks).
